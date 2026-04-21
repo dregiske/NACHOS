@@ -48,6 +48,13 @@ public class Alarm {
 	 * should be run.
 	 */
 	public void timerInterrupt() {
+		boolean intStatus = Machine.interrupt().disable();
+		while(!waitQueue.isEmpty() &&
+			  waitQueue.peek().wakeTime <= Machine.timer().getTime()){
+			WaitingThread front = waitQueue.poll();
+			front.thread.ready();
+		}
+		Machine.interrupt().restore(intStatus);
 		KThread.currentThread().yield();
 	}
 
@@ -67,13 +74,14 @@ public class Alarm {
 		if (x <= 0){
 			return;
 		}
-		// for now, cheat just to get something working (busy waiting is bad)
+		boolean intStatus = Machine.interrupt().disable();
 		long wakeTime = Machine.timer().getTime() + x;
-		while (wakeTime > Machine.timer().getTime())
-			KThread.yield();
+		this.waitQueue.add(new WaitingThread(KThread.currentThread(), wakeTime));
+		KThread.sleep();
+		Machine.interrupt().restore(intStatus);
 	}
 
-        /**
+    /**
 	 * Cancel any timer set by <i>thread</i>, effectively waking
 	 * up the thread immediately (placing it in the scheduler
 	 * ready set) and returning true.  If <i>thread</i> has no
