@@ -71,9 +71,7 @@ public class Alarm {
 	 * @see nachos.machine.Timer#getTime()
 	 */
 	public void waitUntil(long x) {
-		if (x <= 0){
-			return;
-		}
+		if (x <= 0) return;
 		boolean intStatus = Machine.interrupt().disable();
 		long wakeTime = Machine.timer().getTime() + x;
 		this.waitQueue.add(new WaitingThread(KThread.currentThread(), wakeTime));
