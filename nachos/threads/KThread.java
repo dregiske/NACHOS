@@ -465,4 +465,8 @@ public class KThread {
 	private static KThread toBeDestroyed = null;
 
 	private static KThread idleThread = null;
+
+	private KThread joiner = null;
+
+	private boolean joinCalled = false;
 }
