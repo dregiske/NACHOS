@@ -198,6 +198,10 @@ public class KThread {
 
 		Machine.autoGrader().finishingCurrentThread();
 
+		if (currentThread.joiner != null){
+			currentThread.joiner.ready();
+		}
+
 		Lib.assertTrue(toBeDestroyed == null);
 		toBeDestroyed = currentThread;
 
@@ -283,8 +287,19 @@ public class KThread {
 	public void join() {
 		Lib.debug(dbgThread, "Joining to thread: " + toString());
 
+		boolean intStatus = Machine.interrupt().disable();
+
 		Lib.assertTrue(this != currentThread);
 
+		Lib.assertTrue(!this.joinCalled);
+		this.joinCalled = true;
+
+		if(this.status != statusFinished){
+			this.joiner = currentThread;
+			KThread.sleep();
+		}
+	
+		Machine.interrupt().restore(intStatus);
 	}
 
 	/**
