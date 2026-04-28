@@ -53,7 +53,10 @@ public class Condition2 {
 		boolean status = Machine.interrupt().disable();
 
 		if (!waitQueue.isEmpty()) {
-			waitQueue.removeFirst().ready();
+			KThread thread = waitQueue.removeFirst();
+			if (!ThreadedKernel.alarm.cancel(thread)) {
+				thread.ready();
+			}
 		}
 
 		Machine.interrupt().restore(status);
@@ -81,6 +84,19 @@ public class Condition2 {
 	 */
     public void sleepFor(long timeout) {
 		Lib.assertTrue(conditionLock.isHeldByCurrentThread());
+		if (timeout <= 0) return;
+
+		boolean intStatus = Machine.interrupt().disable();
+
+		waitQueue.add(KThread.currentThread());
+		conditionLock.release();
+		ThreadedKernel.alarm.schedule(KThread.currentThread(), timeout);
+		KThread.sleep();
+
+		waitQueue.remove(KThread.currentThread());
+		Machine.interrupt().restore(intStatus);
+
+		conditionLock.acquire();
 	}
 
         private Lock conditionLock;
