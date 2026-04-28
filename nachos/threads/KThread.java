@@ -430,6 +430,152 @@ public class KThread {
 
 		new KThread(new PingTest(1)).setName("forked thread").fork();
 		new PingTest(0).run();
+
+		joinTest1_blocksWhileTargetRunning();
+		joinTest2_doesNotBlockIfTargetFinished();
+		joinTest3_joinSelfAsserts();
+		joinTest4_doubleJoinAsserts();
+		joinTest5_joinMultipleInSuccession();
+		joinTest6_independentPairsNoInterference();
+	}
+
+	// Test 1: B blocks in join() while A is still executing
+	private static void joinTest1_blocksWhileTargetRunning() {
+		System.out.println("KThread Join Test 1: B blocks while A is running");
+		boolean[] bReturned = { false };
+
+		KThread a = new KThread(() -> {
+			ThreadedKernel.alarm.waitUntil(2000);
+		}).setName("join1-A");
+
+		KThread b = new KThread(() -> {
+			a.join();
+			bReturned[0] = true;
+		}).setName("join1-B");
+
+		a.fork();
+		b.fork();
+		KThread.yield(); // A sleeps via alarm, B blocks at a.join(), test thread resumes
+
+		Lib.assertTrue(!bReturned[0], "B should still be blocked in join()");
+
+		b.join();
+		Lib.assertTrue(bReturned[0], "B should have returned from join() after A finished");
+		System.out.println("KThread Join Test 1: passed");
+	}
+
+	// Test 2: B does not block if A has already finished before join() is called
+	private static void joinTest2_doesNotBlockIfTargetFinished() {
+		System.out.println("KThread Join Test 2: no block if target already finished");
+		boolean[] aFinished = { false };
+
+		KThread a = new KThread(() -> {
+			aFinished[0] = true;
+		}).setName("join2-A");
+
+		a.fork();
+		KThread.yield(); // let A run to completion
+
+		Lib.assertTrue(aFinished[0], "A should have finished before B calls join()");
+
+		boolean[] bReturned = { false };
+		KThread b = new KThread(() -> {
+			a.join();
+			bReturned[0] = true;
+		}).setName("join2-B");
+
+		b.fork();
+		KThread.yield(); // B should pass through join() immediately and set the flag
+
+		Lib.assertTrue(bReturned[0], "B should not have blocked since A was already done");
+		b.join();
+		System.out.println("KThread Join Test 2: passed");
+	}
+
+	// Test 3: a thread calling join on itself triggers an assertion
+	private static void joinTest3_joinSelfAsserts() {
+		System.out.println("KThread Join Test 3: join on self asserts");
+		boolean asserted = false;
+		try {
+			KThread.currentThread().join();
+		} catch (Error e) {
+			asserted = true;
+			Machine.interrupt().enable(); // join() disabled interrupts before asserting
+		}
+		Lib.assertTrue(asserted, "joining self should have triggered an assertion");
+		System.out.println("KThread Join Test 3: passed");
+	}
+
+	// Test 4: calling join more than once on the same thread triggers an assertion
+	private static void joinTest4_doubleJoinAsserts() {
+		System.out.println("KThread Join Test 4: double join asserts");
+		KThread a = new KThread(() -> {}).setName("join4-A");
+		a.fork();
+		a.join(); // valid first join — waits for A to finish
+
+		boolean asserted = false;
+		try {
+			a.join(); // second join — must assert
+		} catch (Error e) {
+			asserted = true;
+			Machine.interrupt().enable(); // join() disabled interrupts before asserting
+		}
+		Lib.assertTrue(asserted, "second join() should have triggered an assertion");
+		System.out.println("KThread Join Test 4: passed");
+	}
+
+	// Test 5: one thread can join multiple threads in succession
+	private static void joinTest5_joinMultipleInSuccession() {
+		System.out.println("KThread Join Test 5: join multiple threads in succession");
+		int n = 3;
+		boolean[] finished = new boolean[n];
+
+		KThread[] threads = new KThread[n];
+		for (int i = 0; i < n; i++) {
+			final int id = i;
+			threads[id] = new KThread(() -> {
+				finished[id] = true;
+			}).setName("join5-" + i);
+		}
+
+		for (KThread t : threads) t.fork();
+		for (KThread t : threads) t.join(); // successive joins from this thread
+
+		for (int i = 0; i < n; i++)
+			Lib.assertTrue(finished[i], "thread " + i + " should have finished");
+		System.out.println("KThread Join Test 5: passed");
+	}
+
+	// Test 6: independent pairs (A joins B) and (C joins D) do not interfere
+	private static void joinTest6_independentPairsNoInterference() {
+		System.out.println("KThread Join Test 6: independent pairs no interference");
+		boolean[] aJoinedB = { false };
+		boolean[] cJoinedD = { false };
+
+		KThread b = new KThread(() -> {
+			ThreadedKernel.alarm.waitUntil(1000);
+		}).setName("join6-B");
+
+		KThread d = new KThread(() -> {
+			ThreadedKernel.alarm.waitUntil(1000);
+		}).setName("join6-D");
+
+		KThread a = new KThread(() -> {
+			b.join();
+			aJoinedB[0] = true;
+		}).setName("join6-A");
+
+		KThread c = new KThread(() -> {
+			d.join();
+			cJoinedD[0] = true;
+		}).setName("join6-C");
+
+		b.fork(); d.fork(); a.fork(); c.fork();
+		a.join(); c.join();
+
+		Lib.assertTrue(aJoinedB[0], "A should have successfully joined B");
+		Lib.assertTrue(cJoinedD[0], "C should have successfully joined D");
+		System.out.println("KThread Join Test 6: passed");
 	}
 
 	private static final char dbgThread = 't';
