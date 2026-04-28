@@ -2,11 +2,10 @@
 
 Please do not change the direcory structure! (i.e. do not remove the top-level `nachos` direcotry.)
 
-
 # Group Members:
 
 Audrey Elizabeth Fernandez - A17913980
 
-Preity Singh - 
+Preity Singh -
 
-Andre Giske - 
+Andre Giske - A17918324
