@@ -119,15 +119,6 @@ public class Alarm {
 		return false;
 	}
 
-    /**
-	 * Cancel any timer set by <i>thread</i>, effectively waking
-	 * up the thread immediately (placing it in the scheduler
-	 * ready set) and returning true.  If <i>thread</i> has no
-	 * timer set, return false.
-	 * 
-	 * <p>
-	 * @param thread the thread whose timer should be cancelled.
-	 */
 	public static void selfTest() {
 		testAlarm1_waitsDuration();
 		testAlarm2_zeroNegativeNoWait();
