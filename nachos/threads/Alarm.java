@@ -79,6 +79,12 @@ public class Alarm {
 		Machine.interrupt().restore(intStatus);
 	}
 
+	public void schedule(KThread thread, long x) {
+		Lib.assertTrue(Machine.interrupt().disabled());
+		long wakeTime = Machine.timer().getTime() + x;
+		waitQueue.add(new WaitingThread(thread, wakeTime));
+	}
+
     /**
 	 * Cancel any timer set by <i>thread</i>, effectively waking
 	 * up the thread immediately (placing it in the scheduler
