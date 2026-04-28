@@ -107,6 +107,9 @@ public class Condition2 {
 		test2_wakeOne();
 		test3_wakeAll();
 		test4_lostWake();
+		test5_sleepForTimeout();
+		test6_sleepForWokenEarly();
+		test7_sleepForMultiple();
 	}
 
 	// Test 1: sleep actually blocks
@@ -207,6 +210,104 @@ public class Condition2 {
 		// yield to let them all finish
 		for (int i = 0; i < 5; i++)
 			KThread.yield();
+	}
+
+	// Test 5: sleepFor returns after timeout if no wake() is called
+	private static void test5_sleepForTimeout() {
+		System.out.println("Test 5: sleepFor times out after x ticks");
+		Lock lock = new Lock();
+		Condition2 cv = new Condition2(lock);
+		long[] elapsed = {0};
+
+		KThread t = new KThread(new Runnable() {
+			public void run() {
+				lock.acquire();
+				long start = Machine.timer().getTime();
+				cv.sleepFor(2000);
+				elapsed[0] = Machine.timer().getTime() - start;
+				lock.release();
+			}
+		}).setName("sleepFor-timeout");
+
+		t.fork();
+		t.join();
+
+		Lib.assertTrue(elapsed[0] >= 2000);
+		System.out.println("PASSED: woke after " + elapsed[0] + " ticks (>= 2000)");
+	}
+
+	// Test 6: sleepFor returns early when wake() is called before timeout
+	private static void test6_sleepForWokenEarly() {
+		System.out.println("Test 6: sleepFor woken early by wake()");
+		Lock lock = new Lock();
+		Condition2 cv = new Condition2(lock);
+		long[] elapsed = {0};
+
+		KThread sleeper = new KThread(new Runnable() {
+			public void run() {
+				lock.acquire();
+				long start = Machine.timer().getTime();
+				cv.sleepFor(10000);
+				elapsed[0] = Machine.timer().getTime() - start;
+				lock.release();
+			}
+		}).setName("sleeper");
+
+		KThread waker = new KThread(new Runnable() {
+			public void run() {
+				ThreadedKernel.alarm.waitUntil(500);
+				lock.acquire();
+				cv.wake();
+				lock.release();
+			}
+		}).setName("waker");
+
+		sleeper.fork();
+		waker.fork();
+		sleeper.join();
+		waker.join();
+
+		Lib.assertTrue(elapsed[0] < 10000);
+		System.out.println("PASSED: woke after " + elapsed[0] + " ticks (< 10000)");
+	}
+
+	// Test 7: multiple threads with different timeouts all woken by wakeAll
+	private static void test7_sleepForMultiple() {
+		System.out.println("Test 7: sleepFor multiple threads woken by wakeAll");
+		Lock lock = new Lock();
+		Condition2 cv = new Condition2(lock);
+		int[] wokeCount = {0};
+
+		long[] timeouts = {1000, 2000, 3000};
+		KThread[] threads = new KThread[3];
+
+		for (int i = 0; i < 3; i++) {
+			final long timeout = timeouts[i];
+			final int id = i;
+			threads[i] = new KThread(new Runnable() {
+				public void run() {
+					lock.acquire();
+					cv.sleepFor(timeout);
+					wokeCount[0]++;
+					System.out.println("thread " + id + " woke (timeout=" + timeout + ")");
+					lock.release();
+				}
+			}).setName("t" + i);
+			threads[i].fork();
+		}
+
+		KThread.yield();
+		KThread.yield();
+		KThread.yield();
+
+		lock.acquire();
+		cv.wakeAll();
+		lock.release();
+
+		for (KThread t : threads) t.join();
+
+		Lib.assertTrue(wokeCount[0] == 3);
+		System.out.println("PASSED: all 3 threads woke");
 	}
 
 	// Test 4: wake with no waiters is lost
