@@ -53,6 +53,7 @@ public class ThreadedKernel extends Kernel {
 			ElevatorBank.selfTest();
 		}
 		Condition2.selfTest();
+		Rendezvous.selfTest();
 	}
 
 	/**
