@@ -91,16 +91,13 @@ public class Alarm {
 		waitQueue.add(new WaitingThread(thread, wakeTime));
 	}
 
-    /**
-	 * Cancel any timer set by <i>thread</i>, effectively waking
-	 * up the thread immediately (placing it in the scheduler
-	 * ready set) and returning true.  If <i>thread</i> has no
-	 * timer set, return false.
+	/**
+	 * Removes the thread from the waitQueue pq and wakes immediately.
 	 * 
-	 * <p>
-	 * @param thread the thread whose timer should be cancelled.
+	 * @param thread the thread to cancel
+	 * @return true for valid thread, otherwise false
 	 */
-        public boolean cancel(KThread thread) {
+	public boolean cancel(KThread thread) {
 		boolean intStatus = Machine.interrupt().disable();
 
 		WaitingThread found = null;
@@ -120,5 +117,77 @@ public class Alarm {
 
 		Machine.interrupt().restore(intStatus);
 		return false;
+	}
+
+    /**
+	 * Cancel any timer set by <i>thread</i>, effectively waking
+	 * up the thread immediately (placing it in the scheduler
+	 * ready set) and returning true.  If <i>thread</i> has no
+	 * timer set, return false.
+	 * 
+	 * <p>
+	 * @param thread the thread whose timer should be cancelled.
+	 */
+	public static void selfTest() {
+		testAlarm1_waitsDuration();
+		testAlarm2_zeroNegativeNoWait();
+		testAlarm3_multipleOrdering();
+	}
+
+	// Test 1: thread waits at least x ticks
+	private static void testAlarm1_waitsDuration() {
+		System.out.println("Alarm Test 1: thread waits for requested duration");
+		long start = Machine.timer().getTime();
+		ThreadedKernel.alarm.waitUntil(1000);
+		long elapsed = Machine.timer().getTime() - start;
+		Lib.assertTrue(elapsed >= 1000);
+		System.out.println("PASSED: elapsed = " + elapsed);
+	}
+
+	// Test 2: waitUntil(0) and waitUntil(negative) return immediately
+	private static void testAlarm2_zeroNegativeNoWait() {
+		System.out.println("Alarm Test 2: waitUntil(0) and waitUntil(-x) do not block");
+		long start = Machine.timer().getTime();
+		ThreadedKernel.alarm.waitUntil(0);
+		ThreadedKernel.alarm.waitUntil(-500);
+		long elapsed = Machine.timer().getTime() - start;
+		Lib.assertTrue(elapsed == 0);
+		System.out.println("PASSED: no wait for non-positive durations");
+	}
+
+	// Test 3: multiple threads wake in ascending order of their delay
+	private static void testAlarm3_multipleOrdering() {
+		System.out.println("Alarm Test 3: multiple threads wake in time order");
+		int[] wakeOrder = new int[3];
+		int[] idx = {0};
+
+		KThread t1 = new KThread(new Runnable() {
+			public void run() {
+				ThreadedKernel.alarm.waitUntil(2000);
+				wakeOrder[idx[0]++] = 2000;
+			}
+		}).setName("t1-2000");
+
+		KThread t2 = new KThread(new Runnable() {
+			public void run() {
+				ThreadedKernel.alarm.waitUntil(500);
+				wakeOrder[idx[0]++] = 500;
+			}
+		}).setName("t2-500");
+
+		KThread t3 = new KThread(new Runnable() {
+			public void run() {
+				ThreadedKernel.alarm.waitUntil(1000);
+				wakeOrder[idx[0]++] = 1000;
+			}
+		}).setName("t3-1000");
+
+		t1.fork(); t2.fork(); t3.fork();
+		t1.join(); t2.join(); t3.join();
+
+		Lib.assertTrue(wakeOrder[0] == 500);
+		Lib.assertTrue(wakeOrder[1] == 1000);
+		Lib.assertTrue(wakeOrder[2] == 2000);
+		System.out.println("PASSED: wake order was 500, 1000, 2000");
 	}
 }
