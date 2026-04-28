@@ -79,6 +79,12 @@ public class Alarm {
 		Machine.interrupt().restore(intStatus);
 	}
 
+	/**
+	 * Schedule <i>thread</i> to wake up after <i>x</i> ticks without sleeping.
+	 * Interrupts must already be disabled by the caller.
+	 * 
+	 * @param x the minimum number of clock ticks to wait.
+	 */
 	public void schedule(KThread thread, long x) {
 		Lib.assertTrue(Machine.interrupt().disabled());
 		long wakeTime = Machine.timer().getTime() + x;
