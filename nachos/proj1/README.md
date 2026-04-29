@@ -19,6 +19,14 @@ This class holds a thread, and its wait time value. The test suite tests:
 - Threads are put into the queue in ascending order
 
 ### Audrey Elizabeth Fernandez:
+I implemented the Rendezvous class and tests, which provides a mechanism for threads to meet and exchange values. My implementation uses a HashMap to map an Integer tag to a LinkedList, which functions as that tag's own independent "queue" of pending Slots. When a thread arrives and finds an empty queue, it creates a Slot with its value, adds itself to the queue and sleeps. When a thread arrives and winds a waiting Slot, wakes the  waiting thread and the threads exchange values. 
+
+The test suite verifies:
+- A thread calling exchange blocks until another thread arrives at the same tag to pair with it
+- Each thread correctly recieves the other thread's value after the exchange is completed
+- Many threads calling exchange on the same tag are correctly paired up (without any thread revieving its own value back)
+- Threads exchanging on different tags operate independently, and never pair with each other
+- Separate instances of Rendezvous operate independently so threads on different instances never interact on the same tag
 
 ### Preity Singh:
 
