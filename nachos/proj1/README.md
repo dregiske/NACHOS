@@ -4,7 +4,7 @@
 
 Audrey Elizabeth Fernandez - A17913980
 
-Preity Singh -
+Preity Singh - A17981892
 
 Andre Giske - A17918324
 
@@ -29,6 +29,13 @@ The test suite verifies:
 - Separate instances of Rendezvous operate independently so threads on different instances never interact on the same tag
 
 ### Preity Singh:
+I implemented the Condition2 class, which provides condition variable functionality using interrupt disable and restore for atomicity, instead of than semaphores. The implementation uses a LinkedList<KThread> wait queue. In sleep(), interrupts are disabled before adding the current thread to the queue and releasing the lock, making sure that KThread.sleep() is called atomically. wake() removes and readies one waiting thread under disabled interrupts, and wakeAll() repeatedly calls wake() until the queue is empty.
+
+The test cases verify:
+- A thread calling sleep() blocks until another thread calls wake()
+- wake() wakes at most one thread when multiple threads are waiting
+- wakeAll() wakes all waiting threads
+- A "lost wake" (calling wake() with no waiters) has no effect, and future threads that call sleep() still block
 
 ### Andre Giske:
 
