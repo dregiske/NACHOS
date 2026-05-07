@@ -28,6 +28,12 @@ public class UserProcess {
 		pageTable = new TranslationEntry[numPhysPages];
 		for (int i = 0; i < numPhysPages; i++)
 			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
+
+		// Each process starts with fd 0 (stdin) and fd 1 (stdout) pre-opened,
+		// matching the POSIX convention described in syscall.h.
+		openFiles = new OpenFile[maxFileDescriptors];
+		openFiles[0] = UserKernel.console.openForReading();  // fd 0 = stdin
+		openFiles[1] = UserKernel.console.openForWriting();  // fd 1 = stdout
 	}
 
 	/**
@@ -401,6 +407,27 @@ public class UserProcess {
 		return 0;
 	}
 
+	private int handleCreate(int vaddr) {
+		String name = readVirtualMemoryString(vaddr, 256);
+		if (name == null) return -1;
+
+		for (int fd = 0; fd < maxFileDescriptors; fd++) {
+			if (openFiles[fd] == null) {
+				OpenFile file = ThreadedKernel.fileSystem.open(name, true);
+				if (file == null) return -1;
+				openFiles[fd] = file;
+				return fd;
+			}
+		}
+		return -1;
+	}
+
+	private int handleUnlink(int vaddr) {
+		String name = readVirtualMemoryString(vaddr, 256);
+		if (name == null) return -1;
+		return ThreadedKernel.fileSystem.remove(name) ? 0 : -1;
+	}
+
 	private static final int syscallHalt = 0, syscallExit = 1, syscallExec = 2,
 			syscallJoin = 3, syscallCreate = 4, syscallOpen = 5,
 			syscallRead = 6, syscallWrite = 7, syscallClose = 8,
@@ -473,6 +500,10 @@ public class UserProcess {
 			return handleHalt();
 		case syscallExit:
 			return handleExit(a0);
+		case syscallCreate:
+			return handleCreate(a0);
+		case syscallUnlink:
+			return handleUnlink(a0);
 
 		default:
 			Lib.debug(dbgProcess, "Unknown syscall " + syscall);
@@ -531,4 +562,8 @@ public class UserProcess {
 	private static final int pageSize = Processor.pageSize;
 
 	private static final char dbgProcess = 'a';
+
+	private OpenFile[] openFiles;
+
+	private static final int maxFileDescriptors = 16;
 }
