@@ -452,6 +452,21 @@ public class UserProcess {
 		return bytesRead;
 	}
 
+	private int handleWrite(int fd, int bufVaddr, int size) {
+		if (fd < 0 || fd >= maxFileDescriptors) return -1;
+		if (openFiles(fd) == null) return -1;
+		if (size < 0) return -1;
+
+		byte[] buffer = new byte[size];
+		int bytesRead = readVirtualMemory(bufVaddr, buffer, 0, size);
+		if (bytesRead != size) return -1;
+
+		int bytesWritten = openFiles[fd].write(buffer, 0, bytesRead);
+		if (bytesWritten != bytesRead) return -1;
+
+		return bytesWritten;
+	}
+
 	private int handleUnlink(int vaddr) {
 		String name = readVirtualMemoryString(vaddr, 256);
 		if (name == null) return -1;
