@@ -467,6 +467,15 @@ public class UserProcess {
 		return bytesWritten;
 	}
 
+	private int handleClose(int fd) {
+		if (fd < 0 || fd >= maxFileDescriptors) return -1;
+		if (openFiles[fd] == null) return -1;
+
+		openFiles[fd].close();
+		openFiles[fd] = null;
+		return 0;
+	}
+
 	private int handleUnlink(int vaddr) {
 		String name = readVirtualMemoryString(vaddr, 256);
 		if (name == null) return -1;
