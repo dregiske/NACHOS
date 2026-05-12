@@ -422,6 +422,21 @@ public class UserProcess {
 		return -1;
 	}
 
+	private int handleOpen(int vaddr) {
+		String name = readVirtualMemoryString(vaddr, 256);
+		if(name == null) return -1;
+
+		for (int fd = 0; fd < maxFileDescriptors; fd++) {
+			if (openFiles[fd] == null) {
+				OpenFile file = ThreadedKernel.fileSystem.open(name, false);
+				if (file == null) return -1;
+				openFiles[fd] = file;
+				return fd;
+			}
+		}
+		return -1;
+	}
+
 	private int handleUnlink(int vaddr) {
 		String name = readVirtualMemoryString(vaddr, 256);
 		if (name == null) return -1;
