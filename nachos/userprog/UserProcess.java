@@ -454,7 +454,7 @@ public class UserProcess {
 
 	private int handleWrite(int fd, int bufVaddr, int size) {
 		if (fd < 0 || fd >= maxFileDescriptors) return -1;
-		if (openFiles(fd) == null) return -1;
+		if (openFiles[fd] == null) return -1;
 		if (size < 0) return -1;
 
 		byte[] buffer = new byte[size];
@@ -556,6 +556,14 @@ public class UserProcess {
 			return handleExit(a0);
 		case syscallCreate:
 			return handleCreate(a0);
+		case syscallOpen:
+			return handleOpen(a0);
+		case syscallRead:
+			return handleRead(a0, a1, a2);
+		case syscallWrite:
+			return handleWrite(a0, a1, a2);
+		case syscallClose:
+			return handleClose(a0);
 		case syscallUnlink:
 			return handleUnlink(a0);
 
