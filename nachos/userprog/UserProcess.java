@@ -7,6 +7,8 @@ import nachos.vm.*;
 
 import java.io.EOFException;
 
+import java.util.LinkedList;
+
 /**
  * Encapsulates the state of a user process that is not contained in its user
  * thread (or threads). This includes its address translation state, a file
@@ -20,6 +22,19 @@ import java.io.EOFException;
  * @see nachos.network.NetProcess
  */
 public class UserProcess {
+	private int pid;
+	private static int nextPid = 0;
+	private static Lock pidLock = new Lock();
+
+	private static int activeProcesses = 0;
+	private static Lock processLock = new Lock();
+
+	private UserProcess parent;
+	private LinkedList<UserProcess> children;
+
+	private int exitStatus;
+	private boolean exited = false;
+
 	/**
 	 * Allocate a new process.
 	 */
@@ -29,6 +44,16 @@ public class UserProcess {
 		openFiles = new OpenFile[maxFileDescriptors];
 		openFiles[0] = UserKernel.console.openForReading();  // fd 0 = stdin
 		openFiles[1] = UserKernel.console.openForWriting();  // fd 1 = stdout
+
+		pidLock.acquire();
+		pid = nextPid++;
+		pidLock.release();
+
+		processLock.acquire();
+		activeProcesses++;
+		processLock.release();
+
+		children = new LinkedList<UserProcess>();
 	}
 
 	/**
@@ -444,16 +469,32 @@ public class UserProcess {
 	 * Handle the exit() system call.
 	 */
 	private int handleExit(int status) {
-	        // Do not remove this call to the autoGrader...
+	    // Do not remove this call to the autoGrader...
 		Machine.autoGrader().finishingCurrentProcess(status);
 		// ...and leave it as the top of handleExit so that we
 		// can grade your implementation.
 
-		// for now, simply print out the value of the exit
-		// status for debugging, and unconditionally terminate
-		// with just one process
-		System.out.println ("UserProcess.handleExit (" + status + ")");
-		Kernel.kernel.terminate();
+		for (int fd = 0; fd < maxFileDescriptors; fd++) {
+			if (openFiles[fd] != null) {
+				openFiles[fd].close();
+				openFiles[fd] = null;
+			}
+		}
+
+		unloadSections();
+		exitStatus = status;
+		exited = true;
+		parent = null;
+
+		processLock.acquire();
+		activeProcesses--;
+		boolean last = (activeProcesses == 0);
+		processLock.release();
+
+		if (last)
+			Kernel.kernel.terminate();
+		else
+			KThread.finish();
 
 		return 0;
 	}
