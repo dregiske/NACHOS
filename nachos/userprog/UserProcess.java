@@ -370,6 +370,13 @@ public class UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
+		for (int i = 0; i < pageTable.length; i++){
+			if(pageTable[i] != null && pageTable[i].valid) {
+				UserKernel.freePage(pageTable[i].ppn);
+				pageTable[i].valid = false;
+			}
+		}
+		coff.close();
 	}
 
 	/**
