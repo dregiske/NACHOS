@@ -8,6 +8,7 @@ import nachos.vm.*;
 import java.io.EOFException;
 
 import java.util.LinkedList;
+import java.util.HashMap;
 
 /**
  * Encapsulates the state of a user process that is not contained in its user
@@ -504,6 +505,26 @@ public class UserProcess {
 		String name = readVirtualMemoryString(vaddr, 256);
 		if (name == null) return -1;
 
+		if (name.startsWith("/pipe/")) {
+			pipeTableLock.acquire();
+			if (pipeTable.size() >= 16 || pipeTable.containsKey(name)) {
+				pipeTableLock.release();
+				return -1;
+			}
+			for (int fd = 0; fd < maxFileDescriptors; fd++) {
+				if (openFiles[fd] == null) {
+					Pipe pipe = new Pipe();
+					pipe.refCount = 1;
+					pipeTable.put(name, pipe);
+					pipeTableLock.release();
+					openFiles[fd] = new PipeFile(pipe, name);
+					return fd;
+				}
+			}
+			pipeTableLock.release();
+			return -1;
+		}
+
 		for (int fd = 0; fd < maxFileDescriptors; fd++) {
 			if (openFiles[fd] == null) {
 				OpenFile file = ThreadedKernel.fileSystem.open(name, true);
@@ -517,7 +538,26 @@ public class UserProcess {
 
 	private int handleOpen(int vaddr) {
 		String name = readVirtualMemoryString(vaddr, 256);
-		if(name == null) return -1;
+		if (name == null) return -1;
+
+		if (name.startsWith("/pipe/")) {
+			pipeTableLock.acquire();
+			Pipe pipe = pipeTable.get(name);
+			if (pipe == null) {
+				pipeTableLock.release();
+				return -1;
+			}
+			for (int fd = 0; fd < maxFileDescriptors; fd++) {
+				if (openFiles[fd] == null) {
+					pipe.refCount++;
+					pipeTableLock.release();
+					openFiles[fd] = new PipeFile(pipe, name);
+					return fd;
+				}
+			}
+			pipeTableLock.release();
+			return -1;
+		}
 
 		for (int fd = 0; fd < maxFileDescriptors; fd++) {
 			if (openFiles[fd] == null) {
@@ -769,4 +809,79 @@ public class UserProcess {
 	private OpenFile[] openFiles;
 
 	private static final int maxFileDescriptors = 16;
+
+	private static HashMap<String, Pipe> pipeTable = new HashMap<String, Pipe>();
+	private static Lock pipeTableLock = new Lock();
+
+	private static class Pipe {
+		private static final int PIPE_SIZE = Processor.pageSize;
+		private byte[] buffer = new byte[PIPE_SIZE];
+		private int head = 0, tail = 0, count = 0;
+		private Lock lock = new Lock();
+		private Condition notFull, notEmpty;
+		int refCount = 0;
+
+		Pipe() {
+			notFull = new Condition(lock);
+			notEmpty = new Condition(lock);
+		}
+
+		int read(byte[] buf, int offset, int length) {
+			lock.acquire();
+			while (count == 0) notEmpty.sleep();
+			int amount = Math.min(length, count);
+			for (int i = 0; i < amount; i++) {
+				buf[offset + i] = buffer[head];
+				head = (head + 1) % PIPE_SIZE;
+			}
+			count -= amount;
+			notFull.wakeAll();
+			lock.release();
+			return amount;
+		}
+
+		int write(byte[] buf, int offset, int length) {
+			int written = 0;
+			lock.acquire();
+			while (written < length) {
+				while (count == PIPE_SIZE) notFull.sleep();
+				int space = Math.min(length - written, PIPE_SIZE - count);
+				for (int i = 0; i < space; i++) {
+					buffer[tail] = buf[offset + written + i];
+					tail = (tail + 1) % PIPE_SIZE;
+				}
+				count += space;
+				written += space;
+				notEmpty.wakeAll();
+			}
+			lock.release();
+			return written;
+		}
+	}
+
+	private static class PipeFile extends OpenFile {
+		private Pipe pipe;
+		private String name;
+
+		PipeFile(Pipe pipe, String name) {
+			this.pipe = pipe;
+			this.name = name;
+		}
+
+		public int read(byte[] buf, int offset, int length) {
+			return pipe.read(buf, offset, length);
+		}
+
+		public int write(byte[] buf, int offset, int length) {
+			return pipe.write(buf, offset, length);
+		}
+
+		public void close() {
+			pipeTableLock.acquire();
+			pipe.refCount--;
+			if (pipe.refCount == 0)
+				pipeTable.remove(name);
+			pipeTableLock.release();
+		}
+	}
 }
