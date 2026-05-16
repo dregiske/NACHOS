@@ -574,6 +574,31 @@ public class UserProcess {
 		return ThreadedKernel.fileSystem.remove(name) ? 0 : -1;
 	}
 
+	private int handleExec(int fileVaddr, int argc, int argvVaddr) {
+		String filename = readVirtualMemoryString(fileVaddr, 256);
+		if (filename == null) return -1;
+
+		if (argc < 0) return -1;
+
+		String[] args = new String[argc];
+		byte[] ptrBuf = new byte[4];
+		for (int i = 0; i < argc; i++){
+			if (readVirtualMemory(argvVaddr + i * 4, ptrBuf) != 4) return -1;
+			int argVaddr = Lib.bytesToInt(ptrBuf, 0);
+			args[i] = readVirtualMemoryString(argVaddr, 256);
+			if (args[i] == null) return -1;
+		}
+
+		UserProcess child = newUserProcess();
+		child.parent = this;
+		children.add(child);
+		if(!child.execute(filename, args)){
+			children.remove(child);
+			return -1;
+		}
+		return child.pid;
+	}
+
 	private static final int syscallHalt = 0, syscallExit = 1, syscallExec = 2,
 			syscallJoin = 3, syscallCreate = 4, syscallOpen = 5,
 			syscallRead = 6, syscallWrite = 7, syscallClose = 8,
