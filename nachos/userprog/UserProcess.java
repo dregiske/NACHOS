@@ -599,6 +599,24 @@ public class UserProcess {
 		return child.pid;
 	}
 
+	private int handleJoin(int pid, int statusVaddr){
+		UserProcess child = null;
+		for (UserProcess process : children) {
+			if (process.pid == pid) { child = process; break; }
+		}
+
+		if (child == null) return -1;
+		child.thread.join();
+		children.remove(child);
+
+		if (statusVaddr != 0) {
+			byte[] buf = Lib.bytesFromInt(child.exitStatus);
+			if (writeVirtualMemory(statusVaddr, buf) != 4) return -1;
+		}
+
+		return child.exited ? 1 : 0;
+	}
+
 	private static final int syscallHalt = 0, syscallExit = 1, syscallExec = 2,
 			syscallJoin = 3, syscallCreate = 4, syscallOpen = 5,
 			syscallRead = 6, syscallWrite = 7, syscallClose = 8,
