@@ -459,6 +459,8 @@ public class UserProcess {
 	private int handleHalt() {
 		Lib.debug(dbgProcess, "UserProcess.handleHalt");
 
+		if (pid != 0) return -1;
+
 		Machine.halt();
 
 		Lib.assertNotReached("Machine.halt() did not halt machine!");
@@ -689,6 +691,10 @@ public class UserProcess {
 			return handleHalt();
 		case syscallExit:
 			return handleExit(a0);
+		case syscallExec:
+			return handleExec(a0, a1, a2);
+		case syscallJoin:
+			return handleJoin(a0, a1);
 		case syscallCreate:
 			return handleCreate(a0);
 		case syscallOpen:
