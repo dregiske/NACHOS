@@ -7,6 +7,9 @@ import nachos.vm.*;
 
 import java.io.EOFException;
 
+import java.util.LinkedList;
+import java.util.HashMap;
+
 /**
  * Encapsulates the state of a user process that is not contained in its user
  * thread (or threads). This includes its address translation state, a file
@@ -20,6 +23,19 @@ import java.io.EOFException;
  * @see nachos.network.NetProcess
  */
 public class UserProcess {
+	private int pid;
+	private static int nextPid = 0;
+	private static Lock pidLock = new Lock();
+
+	private static int activeProcesses = 0;
+	private static Lock processLock = new Lock();
+
+	private UserProcess parent;
+	private LinkedList<UserProcess> children;
+
+	private int exitStatus;
+	private boolean exited = false;
+
 	/**
 	 * Allocate a new process.
 	 */
@@ -29,6 +45,16 @@ public class UserProcess {
 		openFiles = new OpenFile[maxFileDescriptors];
 		openFiles[0] = UserKernel.console.openForReading();  // fd 0 = stdin
 		openFiles[1] = UserKernel.console.openForWriting();  // fd 1 = stdout
+
+		pidLock.acquire();
+		pid = nextPid++;
+		pidLock.release();
+
+		processLock.acquire();
+		activeProcesses++;
+		processLock.release();
+
+		children = new LinkedList<UserProcess>();
 	}
 
 	/**
@@ -434,6 +460,8 @@ public class UserProcess {
 	private int handleHalt() {
 		Lib.debug(dbgProcess, "UserProcess.handleHalt");
 
+		if (pid != 0) return -1;
+
 		Machine.halt();
 
 		Lib.assertNotReached("Machine.halt() did not halt machine!");
@@ -444,16 +472,31 @@ public class UserProcess {
 	 * Handle the exit() system call.
 	 */
 	private int handleExit(int status) {
-	        // Do not remove this call to the autoGrader...
+	    // Do not remove this call to the autoGrader...
 		Machine.autoGrader().finishingCurrentProcess(status);
 		// ...and leave it as the top of handleExit so that we
 		// can grade your implementation.
 
-		// for now, simply print out the value of the exit
-		// status for debugging, and unconditionally terminate
-		// with just one process
-		System.out.println ("UserProcess.handleExit (" + status + ")");
-		Kernel.kernel.terminate();
+		for (int fd = 0; fd < maxFileDescriptors; fd++) {
+			if (openFiles[fd] != null) {
+				openFiles[fd].close();
+				openFiles[fd] = null;
+			}
+		}
+
+		unloadSections();
+		exitStatus = status;
+		parent = null;
+
+		processLock.acquire();
+		activeProcesses--;
+		boolean last = (activeProcesses == 0);
+		processLock.release();
+
+		if (last)
+			Kernel.kernel.terminate();
+		else
+			KThread.finish();
 
 		return 0;
 	}
@@ -461,6 +504,26 @@ public class UserProcess {
 	private int handleCreate(int vaddr) {
 		String name = readVirtualMemoryString(vaddr, 256);
 		if (name == null) return -1;
+
+		if (name.startsWith("/pipe/")) {
+			pipeTableLock.acquire();
+			if (pipeTable.size() >= 16 || pipeTable.containsKey(name)) {
+				pipeTableLock.release();
+				return -1;
+			}
+			for (int fd = 0; fd < maxFileDescriptors; fd++) {
+				if (openFiles[fd] == null) {
+					Pipe pipe = new Pipe();
+					pipe.refCount = 1;
+					pipeTable.put(name, pipe);
+					pipeTableLock.release();
+					openFiles[fd] = new PipeFile(pipe, name);
+					return fd;
+				}
+			}
+			pipeTableLock.release();
+			return -1;
+		}
 
 		for (int fd = 0; fd < maxFileDescriptors; fd++) {
 			if (openFiles[fd] == null) {
@@ -475,7 +538,26 @@ public class UserProcess {
 
 	private int handleOpen(int vaddr) {
 		String name = readVirtualMemoryString(vaddr, 256);
-		if(name == null) return -1;
+		if (name == null) return -1;
+
+		if (name.startsWith("/pipe/")) {
+			pipeTableLock.acquire();
+			Pipe pipe = pipeTable.get(name);
+			if (pipe == null) {
+				pipeTableLock.release();
+				return -1;
+			}
+			for (int fd = 0; fd < maxFileDescriptors; fd++) {
+				if (openFiles[fd] == null) {
+					pipe.refCount++;
+					pipeTableLock.release();
+					openFiles[fd] = new PipeFile(pipe, name);
+					return fd;
+				}
+			}
+			pipeTableLock.release();
+			return -1;
+		}
 
 		for (int fd = 0; fd < maxFileDescriptors; fd++) {
 			if (openFiles[fd] == null) {
@@ -531,6 +613,49 @@ public class UserProcess {
 		String name = readVirtualMemoryString(vaddr, 256);
 		if (name == null) return -1;
 		return ThreadedKernel.fileSystem.remove(name) ? 0 : -1;
+	}
+
+	private int handleExec(int fileVaddr, int argc, int argvVaddr) {
+		String filename = readVirtualMemoryString(fileVaddr, 256);
+		if (filename == null) return -1;
+
+		if (argc < 0) return -1;
+
+		String[] args = new String[argc];
+		byte[] ptrBuf = new byte[4];
+		for (int i = 0; i < argc; i++){
+			if (readVirtualMemory(argvVaddr + i * 4, ptrBuf) != 4) return -1;
+			int argVaddr = Lib.bytesToInt(ptrBuf, 0);
+			args[i] = readVirtualMemoryString(argVaddr, 256);
+			if (args[i] == null) return -1;
+		}
+
+		UserProcess child = newUserProcess();
+		child.parent = this;
+		children.add(child);
+		if(!child.execute(filename, args)){
+			children.remove(child);
+			return -1;
+		}
+		return child.pid;
+	}
+
+	private int handleJoin(int pid, int statusVaddr){
+		UserProcess child = null;
+		for (UserProcess process : children) {
+			if (process.pid == pid) { child = process; break; }
+		}
+
+		if (child == null) return -1;
+		child.thread.join();
+		children.remove(child);
+
+		if (statusVaddr != 0) {
+			byte[] buf = Lib.bytesFromInt(child.exitStatus);
+			if (writeVirtualMemory(statusVaddr, buf) != 4) return -1;
+		}
+
+		return child.exited ? 1 : 0;
 	}
 
 	private static final int syscallHalt = 0, syscallExit = 1, syscallExec = 2,
@@ -604,7 +729,12 @@ public class UserProcess {
 		case syscallHalt:
 			return handleHalt();
 		case syscallExit:
+			exited = true;
 			return handleExit(a0);
+		case syscallExec:
+			return handleExec(a0, a1, a2);
+		case syscallJoin:
+			return handleJoin(a0, a1);
 		case syscallCreate:
 			return handleCreate(a0);
 		case syscallOpen:
@@ -679,4 +809,79 @@ public class UserProcess {
 	private OpenFile[] openFiles;
 
 	private static final int maxFileDescriptors = 16;
+
+	private static HashMap<String, Pipe> pipeTable = new HashMap<String, Pipe>();
+	private static Lock pipeTableLock = new Lock();
+
+	private static class Pipe {
+		private static final int PIPE_SIZE = Processor.pageSize;
+		private byte[] buffer = new byte[PIPE_SIZE];
+		private int head = 0, tail = 0, count = 0;
+		private Lock lock = new Lock();
+		private Condition notFull, notEmpty;
+		int refCount = 0;
+
+		Pipe() {
+			notFull = new Condition(lock);
+			notEmpty = new Condition(lock);
+		}
+
+		int read(byte[] buf, int offset, int length) {
+			lock.acquire();
+			while (count == 0) notEmpty.sleep();
+			int amount = Math.min(length, count);
+			for (int i = 0; i < amount; i++) {
+				buf[offset + i] = buffer[head];
+				head = (head + 1) % PIPE_SIZE;
+			}
+			count -= amount;
+			notFull.wakeAll();
+			lock.release();
+			return amount;
+		}
+
+		int write(byte[] buf, int offset, int length) {
+			int written = 0;
+			lock.acquire();
+			while (written < length) {
+				while (count == PIPE_SIZE) notFull.sleep();
+				int space = Math.min(length - written, PIPE_SIZE - count);
+				for (int i = 0; i < space; i++) {
+					buffer[tail] = buf[offset + written + i];
+					tail = (tail + 1) % PIPE_SIZE;
+				}
+				count += space;
+				written += space;
+				notEmpty.wakeAll();
+			}
+			lock.release();
+			return written;
+		}
+	}
+
+	private static class PipeFile extends OpenFile {
+		private Pipe pipe;
+		private String name;
+
+		PipeFile(Pipe pipe, String name) {
+			this.pipe = pipe;
+			this.name = name;
+		}
+
+		public int read(byte[] buf, int offset, int length) {
+			return pipe.read(buf, offset, length);
+		}
+
+		public int write(byte[] buf, int offset, int length) {
+			return pipe.write(buf, offset, length);
+		}
+
+		public void close() {
+			pipeTableLock.acquire();
+			pipe.refCount--;
+			if (pipe.refCount == 0)
+				pipeTable.remove(name);
+			pipeTableLock.release();
+		}
+	}
 }
