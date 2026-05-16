@@ -330,7 +330,9 @@ public class UserProcess {
 			return false;
 		}
 
-		// load sections
+		pageTable = new TranslationEntry[numPages];
+
+		int coffPages = 0;
 		for (int s = 0; s < coff.getNumSections(); s++) {
 			CoffSection section = coff.getSection(s);
 
@@ -340,9 +342,25 @@ public class UserProcess {
 			for (int i = 0; i < section.getLength(); i++) {
 				int vpn = section.getFirstVPN() + i;
 
-				// for now, just assume virtual addresses=physical addresses
-				section.loadPage(i, vpn);
+				int ppn = UserKernel.allocatePage();
+				if (ppn == -1) {
+					coff.close();
+					return false;
+				}
+
+				pageTable[vpn] = new TranslationEntry(vpn, ppn, true, section.isReadOnly(), false, false);
+				section.loadPage(i, ppn);
+				coffPages++;
 			}
+		}
+
+		for (int vpn = coffPages; vpn < numPages; vpn++) {
+			int ppn = UserKernel.allocatePage();
+			if (ppn == -1) {
+				coff.close();
+				return false;
+			}
+			pageTable[vpn] = new TranslationEntry(vpn, ppn, true, false, false, false);
 		}
 
 		return true;
