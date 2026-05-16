@@ -485,7 +485,6 @@ public class UserProcess {
 
 		unloadSections();
 		exitStatus = status;
-		exited = true;
 		parent = null;
 
 		processLock.acquire();
@@ -690,6 +689,7 @@ public class UserProcess {
 		case syscallHalt:
 			return handleHalt();
 		case syscallExit:
+			exited = true;
 			return handleExit(a0);
 		case syscallExec:
 			return handleExec(a0, a1, a2);
