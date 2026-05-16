@@ -24,11 +24,6 @@ public class UserProcess {
 	 * Allocate a new process.
 	 */
 	public UserProcess() {
-		int numPhysPages = Machine.processor().getNumPhysPages();
-		pageTable = new TranslationEntry[numPhysPages];
-		for (int i = 0; i < numPhysPages; i++)
-			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
-
 		// Each process starts with fd 0 (stdin) and fd 1 (stdout) pre-opened,
 		// matching the POSIX convention described in syscall.h.
 		openFiles = new OpenFile[maxFileDescriptors];
@@ -208,15 +203,32 @@ public class UserProcess {
 				&& offset + length <= data.length);
 
 		byte[] memory = Machine.processor().getMemory();
+		int transferred = 0;
 
-		// for now, just assume that virtual addresses equal physical addresses
-		if (vaddr < 0 || vaddr >= memory.length)
-			return 0;
+		while(length > 0) {
+			int vpn = vaddr / pageSize;
+			int pageOffset = vaddr % pageSize;
 
-		int amount = Math.min(length, memory.length - vaddr);
-		System.arraycopy(data, offset, memory, vaddr, amount);
+			if(vpn < 0 || vpn >= pageTable.length
+					|| pageTable[vpn] == null || !pageTable[vpn].valid)
+				break;
 
-		return amount;
+			if(pageTable[vpn].readOnly)
+				break;
+			
+			int ppn = pageTable[vpn].ppn;
+			int physAddr = ppn * pageSize + pageOffset;
+
+			int amount = Math.min(length, pageSize - pageOffset);
+			System.arraycopy(data, offset, memory, physAddr, amount);
+
+			vaddr += amount;
+			offset += amount;
+			length -= amount;
+			transferred += amount;
+		}
+
+		return transferred;
 	}
 
 	/**
