@@ -180,8 +180,8 @@ public class UserProcess {
 			int pageOffset = vaddr % pageSize;
 
 			if (vpn < 0 || vpn >= pageTable.length
-					|| pageTable[vpn] == null || !pageTable[vpn].valid)
-				break;
+                || pageTable[vpn] == null || !pageTable[vpn].valid)
+            break;
 
 			int ppn = pageTable[vpn].ppn;
 			int physAddr = ppn * pageSize + pageOffset;
@@ -235,12 +235,12 @@ public class UserProcess {
 			int vpn = vaddr / pageSize;
 			int pageOffset = vaddr % pageSize;
 
-			if(vpn < 0 || vpn >= pageTable.length
-					|| pageTable[vpn] == null || !pageTable[vpn].valid)
-				break;
+			if (vpn < 0 || vpn >= pageTable.length
+                || pageTable[vpn] == null || !pageTable[vpn].valid)
+            	break;
 
-			if(pageTable[vpn].readOnly)
-				break;
+        	if (pageTable[vpn].readOnly)
+            	break;
 			
 			int ppn = pageTable[vpn].ppn;
 			int physAddr = ppn * pageSize + pageOffset;
