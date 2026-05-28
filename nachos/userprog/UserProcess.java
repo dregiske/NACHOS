@@ -524,12 +524,12 @@ public class UserProcess {
 			pipeTableLock.release();
 			return -1;
 		}
-
+	
 		for (int fd = 0; fd < maxFileDescriptors; fd++) {
-			if (openFiles[fd] == null) {
-				OpenFile file = ThreadedKernel.fileSystem.open(name, true);
+			if (openFiles[fd] == null) { 
+				OpenFile file = ThreadedKernel.fileSystem.open(name, true); 
 				if (file == null) return -1;
-				openFiles[fd] = file;
+				openFiles[fd] = file; 
 				return fd;
 			}
 		}
@@ -572,7 +572,7 @@ public class UserProcess {
 
 	private int handleRead(int fd, int bufVaddr, int size) {
 		if (fd < 0 || fd >= maxFileDescriptors) return -1;
-		if (openFiles[fd] == null) return -1;
+		if (openFiles[fd] == null) return -1; 
 		if (size < 0) return -1; 
 
 		byte[] buffer = new byte[size];
@@ -587,12 +587,12 @@ public class UserProcess {
 
 	private int handleWrite(int fd, int bufVaddr, int size) {
 		if (fd < 0 || fd >= maxFileDescriptors) return -1;
-		if (openFiles[fd] == null) return -1;
-		if (size < 0) return -1;
+		if (openFiles[fd] == null) return -1; 
+		if (size < 0) return -1; 
 
-		byte[] buffer = new byte[size];
-		int bytesRead = readVirtualMemory(bufVaddr, buffer, 0, size);
-		if (bytesRead != size) return -1;
+		byte[] buffer = new byte[size]; 
+		int bytesRead = readVirtualMemory(bufVaddr, buffer, 0, size); 
+		if (bytesRead != size) return -1; 
 
 		int bytesWritten = openFiles[fd].write(buffer, 0, bytesRead);
 		if (bytesWritten != bytesRead) return -1;

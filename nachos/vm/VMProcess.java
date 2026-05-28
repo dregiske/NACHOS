@@ -4,6 +4,7 @@ import nachos.machine.*;
 import nachos.threads.*;
 import nachos.userprog.*;
 import nachos.vm.*;
+import java.util.Arrays;
 
 /**
  * A <tt>UserProcess</tt> that supports demand-paging.
@@ -39,7 +40,12 @@ public class VMProcess extends UserProcess {
 	 * @return <tt>true</tt> if successful.
 	 */
 	protected boolean loadSections() {
-		return super.loadSections();
+		pageTable = new TranslationEntry[numPages];
+
+		for (int i = 0; i < numPages; i++) {
+			pageTable[i] = new TranslationEntry(i, -1, false, false, false, false);
+		}
+		return true;
 	}
 
 	/**
@@ -60,6 +66,38 @@ public class VMProcess extends UserProcess {
 		Processor processor = Machine.processor();
 
 		switch (cause) {
+
+		case Processor.exceptionPageFault:
+			int vaddr = processor.readRegister(Processor.regBadVAddr);
+			int vpn = Processor.pageFromAddress(vaddr);
+
+			int ppn = UserKernel.allocatePage();
+			if (ppn == -1) {
+				UThread.finish();
+				break;
+			}
+
+			byte[] memory = processor.getMemory();
+			int paddr = ppn * pageSize;
+			Arrays.fill(memory, paddr, paddr + pageSize, (byte) 0);
+
+			boolean readOnly = false;
+			for (int s = 0; s < coff.getNumSections(); s++) {
+				CoffSection section = coff.getSection(s);
+				int firstVPN = section.getFirstVPN();
+				if (vpn >= firstVPN && vpn < firstVPN + section.getLength()) {
+					section.loadPage(vpn - firstVPN, ppn);
+					readOnly = section.isReadOnly();
+					break;
+				}
+			}
+
+			pageTable[vpn].ppn = ppn;
+			pageTable[vpn].valid = true;
+			pageTable[vpn].readOnly = readOnly;
+
+			break;
+
 		default:
 			super.handleException(cause);
 			break;
