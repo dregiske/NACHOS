@@ -68,7 +68,13 @@ public class VMProcess extends UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
-		super.unloadSections();
+		for (int i = 0; i < numPages; i++) {
+			if (pageTable[i[ != null && pageTable[i].valid]]) {
+				UserKernel.freePage(pageTable[i].ppn);
+				pageTable[i].valid = false;
+			}
+		}
+		coff.close();
 	}
 
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
