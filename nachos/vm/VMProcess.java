@@ -54,7 +54,7 @@ public class VMProcess extends UserProcess {
 	 */
 	protected void unloadSections() {
 		for (int i = 0; i < numPages; i++) {
-			if (pageTable[i[ != null && pageTable[i].valid]]) {
+			if (pageTable[i] != null && pageTable[i].valid) {
 				UserKernel.freePage(pageTable[i].ppn);
 				pageTable[i].valid = false;
 			}
