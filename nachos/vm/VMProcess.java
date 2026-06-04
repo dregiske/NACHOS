@@ -40,21 +40,6 @@ public class VMProcess extends UserProcess {
 	 * @return <tt>true</tt> if successful.
 	 */
 	protected boolean loadSections() {
-
-		int coffPages = 0;
-		for (int s = 0; s < coff.getNumSections(); s++) {
-			coffPages += coff.getSection(s).getLength();
-		}
-		numPages = coffPages + stackPages + 1;
-
-		// check if theres enough virtual address space for numPages
-		if (numPages > Machine.processor().getNumPhysPages()) {
-			coff.close();
-			Lib.debug(dbgProcess, "\tinsufficient physical pages");
-			return false;
-		}
-
-		// create page table and make the entries invalid.
 		pageTable = new TranslationEntry[numPages];
 
 		for (int i = 0; i < numPages; i++) {
