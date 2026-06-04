@@ -45,6 +45,7 @@ public class VMProcess extends UserProcess {
 		for (int i = 0; i < numPages; i++) {
 			pageTable[i] = new TranslationEntry(i, -1, false, false, false, false);
 		}
+
 		return true;
 	}
 
