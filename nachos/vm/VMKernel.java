@@ -132,6 +132,14 @@ public class VMKernel extends UserKernel {
 	}
 
 	/**
+	 * Clear the inverted-page-table entry for physical frame <tt>ppn</tt> (e.g.
+	 * when its owning process terminates). Caller must hold {@link #vmLock}.
+	 */
+	public static void clearPage(int ppn) {
+		ipt[ppn] = null;
+	}
+
+	/**
 	 * Select a victim frame with the clock algorithm, evict its page to swap, and
 	 * return the now-free physical page number. Caller must hold {@link #vmLock}.
 	 *
@@ -187,7 +195,7 @@ public class VMKernel extends UserKernel {
 	private static int clockHand;
 
 	/** Coarse global lock protecting the IPT, clock hand, and page-fault path. */
-	private static Lock vmLock;
+	static Lock vmLock;
 
 	private static final String swapFileName = "nachos.swap";
 
