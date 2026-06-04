@@ -54,12 +54,27 @@ public class VMProcess extends UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
+		VMKernel.vmLock.acquire();
+
+		// Free every physical frame this process currently holds, clearing the
+		// inverted page table so the clock no longer considers it ours.
 		for (int i = 0; i < numPages; i++) {
 			if (pageTable[i] != null && pageTable[i].valid) {
-				UserKernel.freePage(pageTable[i].ppn);
+				int ppn = pageTable[i].ppn;
+				VMKernel.clearPage(ppn);
+				UserKernel.freePage(ppn);
 				pageTable[i].valid = false;
+				pageTable[i].ppn = -1;
 			}
 		}
+
+		// Free every swap slot this process allocated.
+		for (int slot : swapTable.values())
+			VMKernel.freeSwapSlot(slot);
+		swapTable.clear();
+
+		VMKernel.vmLock.release();
+
 		coff.close();
 	}
 
@@ -137,30 +152,45 @@ public class VMProcess extends UserProcess {
 	}
 
 	private void handlePageFault(int vpn) {
-        // ... the helper code ...
+		VMKernel.vmLock.acquire();
+
+		// Obtain a physical frame: take a free one if available, otherwise evict.
 		int ppn = UserKernel.allocatePage();
-		if (ppn == -1) {
-			return;
-		}
+		if (ppn == -1)
+			ppn = VMKernel.evictPage();
 
 		byte[] memory = Machine.processor().getMemory();
 		int paddr = ppn * pageSize;
-		Arrays.fill(memory, paddr, paddr + pageSize, (byte) 0);
 
-		boolean readOnly = false;
-		for (int s = 0; s < coff.getNumSections(); s++) {
-			CoffSection section = coff.getSection(s);
-			int firstVPN = section.getFirstVPN();
-			if (vpn >= firstVPN && vpn < firstVPN + section.getLength()) {
-				section.loadPage(vpn - firstVPN, ppn);
-				readOnly = section.isReadOnly();
-				break;
+		// Fill the frame from the correct source.
+		Integer slot = swapTable.remove(vpn);
+		if (slot != null) {
+			// Previously evicted: restore its contents from swap.
+			VMKernel.swapIn(slot, ppn);
+			VMKernel.freeSwapSlot(slot);
+		} else {
+			// First touch: zero-fill, then overlay COFF contents if this page
+			// belongs to a section. Stack/arg pages stay zeroed.
+			Arrays.fill(memory, paddr, paddr + pageSize, (byte) 0);
+			for (int s = 0; s < coff.getNumSections(); s++) {
+				CoffSection section = coff.getSection(s);
+				int firstVPN = section.getFirstVPN();
+				if (vpn >= firstVPN && vpn < firstVPN + section.getLength()) {
+					section.loadPage(vpn - firstVPN, ppn);
+					pageTable[vpn].readOnly = section.isReadOnly();
+					break;
+				}
 			}
 		}
 
 		pageTable[vpn].ppn = ppn;
 		pageTable[vpn].valid = true;
-		pageTable[vpn].readOnly = readOnly;
+		pageTable[vpn].used = true;
+
+		// Register the frame in the inverted page table so it can be evicted.
+		VMKernel.registerPage(ppn, this, pageTable[vpn]);
+
+		VMKernel.vmLock.release();
     }
 
 	/**
