@@ -92,17 +92,23 @@ public class VMProcess extends UserProcess {
 			if (vpn < 0 || vpn >= pageTable.length || pageTable[vpn] == null)
 				break;
 
-			if (!pageTable[vpn].valid)
-				handlePageFault(vpn);
+			VMKernel.vmLock.acquire();
 
 			if (!pageTable[vpn].valid)
+				handlePageFaultLocked(vpn);
+
+			if (!pageTable[vpn].valid) {
+				VMKernel.vmLock.release();
 				break;
+			}
 
 			int ppn = pageTable[vpn].ppn;
 			int physAddr = ppn * pageSize + pageOffset;
 
 			int amount = Math.min(length, pageSize - pageOffset);
 			System.arraycopy(memory, physAddr, data, offset, amount);
+
+			VMKernel.vmLock.release();
 
 			vaddr += amount;
 			offset += amount;
@@ -127,20 +133,24 @@ public class VMProcess extends UserProcess {
 			if (vpn < 0 || vpn >= pageTable.length || pageTable[vpn] == null)
 				break;
 
-			if (!pageTable[vpn].valid)
-				handlePageFault(vpn);
+
+			VMKernel.vmLock.acquire();
 
 			if (!pageTable[vpn].valid)
-				break;
+				handlePageFaultLocked(vpn);
 
-			if (pageTable[vpn].readOnly)
+			if (!pageTable[vpn].valid || pageTable[vpn].readOnly) {
+				VMKernel.vmLock.release();
 				break;
+			}
 
 			int ppn = pageTable[vpn].ppn;
 			int physAddr = ppn * pageSize + pageOffset;
 
 			int amount = Math.min(length, pageSize - pageOffset);
 			System.arraycopy(data, offset, memory, physAddr, amount);
+
+			VMKernel.vmLock.release();
 
 			vaddr += amount;
 			offset += amount;
@@ -151,9 +161,23 @@ public class VMProcess extends UserProcess {
 		return transferred;
 	}
 
+	/**
+	 * Fault in the page for <tt>vpn</tt>, acquiring the global VM lock for the
+	 * duration. Used by the exception handler, which holds no lock.
+	 */
 	private void handlePageFault(int vpn) {
 		VMKernel.vmLock.acquire();
+		handlePageFaultLocked(vpn);
+		VMKernel.vmLock.release();
+	}
 
+	/**
+	 * Fault in the page for <tt>vpn</tt>. The caller must already hold
+	 * {@link VMKernel#vmLock}; readVirtualMemory/writeVirtualMemory call this
+	 * directly so the lock can also cover the subsequent copy, keeping the page
+	 * from being evicted between fault-in and use.
+	 */
+	private void handlePageFaultLocked(int vpn) {
 		// Obtain a physical frame: take a free one if available, otherwise evict.
 		int ppn = UserKernel.allocatePage();
 		if (ppn == -1)
@@ -169,8 +193,6 @@ public class VMProcess extends UserProcess {
 			VMKernel.swapIn(slot, ppn);
 			VMKernel.freeSwapSlot(slot);
 		} else {
-			// First touch: zero-fill, then overlay COFF contents if this page
-			// belongs to a section. Stack/arg pages stay zeroed.
 			Arrays.fill(memory, paddr, paddr + pageSize, (byte) 0);
 			for (int s = 0; s < coff.getNumSections(); s++) {
 				CoffSection section = coff.getSection(s);
@@ -189,8 +211,6 @@ public class VMProcess extends UserProcess {
 
 		// Register the frame in the inverted page table so it can be evicted.
 		VMKernel.registerPage(ppn, this, pageTable[vpn]);
-
-		VMKernel.vmLock.release();
     }
 
 	/**
