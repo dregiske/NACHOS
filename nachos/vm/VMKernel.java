@@ -5,6 +5,8 @@ import nachos.threads.*;
 import nachos.userprog.*;
 import nachos.vm.*;
 
+import java.util.LinkedList;
+
 /**
  * A kernel that can support multiple demand-paging user processes.
  */
@@ -21,6 +23,13 @@ public class VMKernel extends UserKernel {
 	 */
 	public void initialize(String[] args) {
 		super.initialize(args);
+
+		// One global swap file for the lifetime of the kernel. Units are pages.
+		swapFile = ThreadedKernel.fileSystem.open(swapFileName, true);
+		Lib.assertTrue(swapFile != null, "could not create swap file");
+		freeSwapSlots = new LinkedList<Integer>();
+		swapSize = 0;
+		swapLock = new Lock();
 	}
 
 	/**
@@ -41,8 +50,72 @@ public class VMKernel extends UserKernel {
 	 * Terminate this kernel. Never returns.
 	 */
 	public void terminate() {
+		// Drop the swap file; it should not outlive the kernel.
+		if (swapFile != null) {
+			swapFile.close();
+			ThreadedKernel.fileSystem.remove(swapFileName);
+			swapFile = null;
+		}
 		super.terminate();
 	}
+
+	/**
+	 * Reserve a free page-sized slot in the swap file, growing the file if no
+	 * previously freed slot is available.
+	 *
+	 * @return the slot number (its byte offset in the file is slot * pageSize).
+	 */
+	public static int allocateSwapSlot() {
+		swapLock.acquire();
+		int slot = freeSwapSlots.isEmpty() ? swapSize++ : freeSwapSlots.removeFirst();
+		swapLock.release();
+		return slot;
+	}
+
+	/**
+	 * Return a swap slot to the free list so a future page can reuse it.
+	 */
+	public static void freeSwapSlot(int slot) {
+		swapLock.acquire();
+		freeSwapSlots.add(slot);
+		swapLock.release();
+	}
+
+	/**
+	 * Page out: copy the contents of physical frame <tt>ppn</tt> to swap slot
+	 * <tt>slot</tt>.
+	 */
+	public static void swapOut(int ppn, int slot) {
+		byte[] memory = Machine.processor().getMemory();
+		int written = swapFile.write(slot * pageSize, memory, ppn * pageSize, pageSize);
+		Lib.assertTrue(written == pageSize, "swap out write failed");
+	}
+
+	/**
+	 * Page in: copy the contents of swap slot <tt>slot</tt> into physical frame
+	 * <tt>ppn</tt>.
+	 */
+	public static void swapIn(int slot, int ppn) {
+		byte[] memory = Machine.processor().getMemory();
+		int read = swapFile.read(slot * pageSize, memory, ppn * pageSize, pageSize);
+		Lib.assertTrue(read == pageSize, "swap in read failed");
+	}
+
+	/** The single global swap file, divided into page-sized slots. */
+	private static OpenFile swapFile;
+
+	/** Free list of reusable swap slots (gaps left by terminated processes). */
+	private static LinkedList<Integer> freeSwapSlots;
+
+	/** Number of slots ever handed out; next slot to grow into. */
+	private static int swapSize;
+
+	/** Protects the swap-slot free list. */
+	private static Lock swapLock;
+
+	private static final String swapFileName = "nachos.swap";
+
+	private static final int pageSize = Processor.pageSize;
 
 	// dummy variables to make javac smarter
 	private static VMProcess dummy1 = null;
