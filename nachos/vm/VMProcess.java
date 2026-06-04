@@ -5,6 +5,7 @@ import nachos.threads.*;
 import nachos.userprog.*;
 import nachos.vm.*;
 import java.util.Arrays;
+import java.util.HashMap;
 
 /**
  * A <tt>UserProcess</tt> that supports demand-paging.
@@ -185,6 +186,18 @@ public class VMProcess extends UserProcess {
 			break;
 		}
 	}
+
+	/**
+	 * Record that this process's virtual page <tt>vpn</tt> has been evicted to
+	 * swap slot <tt>slot</tt>. Called by {@link VMKernel#evictPage} when this
+	 * process owns the victim frame. Caller holds the global VM lock.
+	 */
+	public void recordSwap(int vpn, int slot) {
+		swapTable.put(vpn, slot);
+	}
+
+	/** Maps each evicted virtual page to its slot in the global swap file. */
+	private HashMap<Integer, Integer> swapTable = new HashMap<Integer, Integer>();
 
 	private static final int pageSize = Processor.pageSize;
 
