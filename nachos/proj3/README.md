@@ -10,7 +10,7 @@ Andre Giske - A17918324
 
 ### Audrey Elizabeth Fernandez
 
-I contributed to the checkpoint and part 2
+I contributed to the checkpoint and part 2. For the checkpoint, I helped implemtnt the lazy page table initialization in `loadSections` and `unloadSections` which frees both physical frames and swap slots on process exit. For part 2, I worked alongside Andre to brainstorm a solution.
 
 ### Preity Singh
 Checkpoint: Modified loadSections to mark all page table entries invalid upfront with no physical memory allocated. On first access, the CPU faults into handlePageFaultLocked, which grabs a free frame, loads the right COFF section or zero-fills for stack/args, marks the entry valid, and lets the instruction retry.
