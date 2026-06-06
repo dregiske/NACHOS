@@ -13,5 +13,6 @@ Andre Giske - A17918324
 I contributed to the checkpoint and part 2
 
 ### Preity Singh
+I implemented the checkpoint and parts 3 and 4.
 
 ### Andre Giske
