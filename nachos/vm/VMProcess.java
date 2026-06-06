@@ -54,7 +54,7 @@ public class VMProcess extends UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
-		VMKernel.VMKernel.vmLock.acquire();
+		VMKernel.vmLock.acquire();
 
 		// Free every physical frame this process currently holds, clearing the
 		// inverted page table so the clock no longer considers it ours.
@@ -73,7 +73,7 @@ public class VMProcess extends UserProcess {
 			VMKernel.freeSwapSlot(slot);
 		swapTable.clear();
 
-		VMKernel.VMKernel.vmLock.release();
+		VMKernel.vmLock.release();
 
 		coff.close();
 	}
@@ -92,13 +92,13 @@ public class VMProcess extends UserProcess {
 			if (vpn < 0 || vpn >= pageTable.length || pageTable[vpn] == null)
 				break;
 
-			VMKernel.VMKernel.vmLock.acquire();
+			VMKernel.vmLock.acquire();
 
 			if (!pageTable[vpn].valid)
 				handlePageFaultLocked(vpn);
 
 			if (!pageTable[vpn].valid) {
-				VMKernel.VMKernel.vmLock.release();
+				VMKernel.vmLock.release();
 				break;
 			}
 
@@ -108,7 +108,7 @@ public class VMProcess extends UserProcess {
 			int amount = Math.min(length, pageSize - pageOffset);
 			System.arraycopy(memory, physAddr, data, offset, amount);
 
-			VMKernel.VMKernel.vmLock.release();
+			VMKernel.vmLock.release();
 
 			vaddr += amount;
 			offset += amount;
@@ -134,13 +134,13 @@ public class VMProcess extends UserProcess {
 				break;
 
 
-			VMKernel.VMKernel.vmLock.acquire();
+			VMKernel.vmLock.acquire();
 
 			if (!pageTable[vpn].valid)
 				handlePageFaultLocked(vpn);
 
 			if (!pageTable[vpn].valid || pageTable[vpn].readOnly) {
-				VMKernel.VMKernel.vmLock.release();
+				VMKernel.vmLock.release();
 				break;
 			}
 
@@ -151,7 +151,7 @@ public class VMProcess extends UserProcess {
 			System.arraycopy(data, offset, memory, physAddr, amount);
 			pageTable[vpn].dirty = true;  // mark page dirty after writing
 
-			VMKernel.VMKernel.vmLock.release();
+			VMKernel.vmLock.release();
 
 			vaddr += amount;
 			offset += amount;
@@ -167,9 +167,9 @@ public class VMProcess extends UserProcess {
 	 * duration. Used by the exception handler, which holds no lock.
 	 */
 	private void handlePageFault(int vpn) {
-		VMKernel.VMKernel.vmLock.acquire();
+		VMKernel.vmLock.acquire();
 		handlePageFaultLocked(vpn);
-		VMKernel.VMKernel.vmLock.release();
+		VMKernel.vmLock.release();
 	}
 
 	/**
