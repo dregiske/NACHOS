@@ -10,6 +10,8 @@ Andre Giske - A17918324
 
 ### Audrey Elizabeth Fernandez
 
+I helped with the checkpoint and part 2
+
 ### Preity Singh
 
 ### Andre Giske
