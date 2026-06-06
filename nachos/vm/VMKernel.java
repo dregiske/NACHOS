@@ -36,6 +36,8 @@ public class VMKernel extends UserKernel {
 		ipt = new IPTEntry[Machine.processor().getNumPhysPages()];
 		clockHand = 0;
 		vmLock = new Lock();
+		pinnedCount = 0;
+		unpinCondition = new Condition(vmLock);
 	}
 
 	/**
@@ -139,6 +141,19 @@ public class VMKernel extends UserKernel {
 		ipt[ppn] = null;
 	}
 
+	/** Pin frame <tt>ppn</tt> so the clock algorithm skips it. Caller holds vmLock. */
+	public static void pinPage(int ppn) {
+		ipt[ppn].pinned = true;
+		pinnedCount++;
+	}
+
+	/** Unpin frame <tt>ppn</tt> and wake any thread blocked in evictPage. Caller holds vmLock. */
+	public static void unpinPage(int ppn) {
+		ipt[ppn].pinned = false;
+		pinnedCount--;
+		unpinCondition.wake();
+	}
+
 	/**
 	 * Select a victim frame with the clock algorithm, evict its page to swap, and
 	 * return the now-free physical page number. Caller must hold {@link #vmLock}.
@@ -150,6 +165,10 @@ public class VMKernel extends UserKernel {
 	 * @return the freed physical page number.
 	 */
 	public static int evictPage() {
+		// Block if every physical frame is currently pinned 
+		while (pinnedCount == ipt.length)
+			unpinCondition.sleep();
+
 		while (true) {
 			IPTEntry e = ipt[clockHand];
 			if (e == null || e.pinned || e.entry.used) {
@@ -165,12 +184,24 @@ public class VMKernel extends UserKernel {
 		IPTEntry victim = ipt[victimPpn];
 		clockHand = (clockHand + 1) % ipt.length;
 
-		int slot = allocateSwapSlot();
-		swapOut(victimPpn, slot);
-		victim.process.recordSwap(victim.entry.vpn, slot);
-
+		// Pin the victim and invalidate its TE before releasing the lock.
+		// Keep ipt[victimPpn] alive so the pinned flag is visible to the clock.
+		pinPage(victimPpn);
 		victim.entry.valid = false;
 		victim.entry.ppn = -1;
+
+		// Write dirty pages to swap outside the lock.
+		if (victim.entry.dirty) {
+			int existingSlot = victim.process.getSwapSlot(victim.entry.vpn);
+			int slot = (existingSlot >= 0) ? existingSlot : allocateSwapSlot();
+			vmLock.release();
+			swapOut(victimPpn, slot);
+			vmLock.acquire();
+			victim.process.recordSwap(victim.entry.vpn, slot);
+		}
+
+		// Unpin first (unpinPage reads ipt[ppn]), then clear the IPT entry.
+		unpinPage(victimPpn);
 		ipt[victimPpn] = null;
 
 		return victimPpn;
@@ -196,6 +227,12 @@ public class VMKernel extends UserKernel {
 
 	/** Coarse global lock protecting the IPT, clock hand, and page-fault path. */
 	static Lock vmLock;
+
+	/** Number of physical frames currently pinned for in-flight I/O. */
+	static int pinnedCount;
+
+	/** Woken when a frame is unpinned, allowing a blocked evictPage to proceed. */
+	static Condition unpinCondition;
 
 	private static final String swapFileName = "nachos.swap";
 

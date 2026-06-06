@@ -149,6 +149,7 @@ public class VMProcess extends UserProcess {
 
 			int amount = Math.min(length, pageSize - pageOffset);
 			System.arraycopy(data, offset, memory, physAddr, amount);
+			pageTable[vpn].dirty = true;  // mark page dirty after writing
 
 			VMKernel.vmLock.release();
 
@@ -183,34 +184,49 @@ public class VMProcess extends UserProcess {
 		if (ppn == -1)
 			ppn = VMKernel.evictPage();
 
+		VMKernel.registerPage(ppn, this, pageTable[vpn]);
+		VMKernel.pinPage(ppn);
+
 		byte[] memory = Machine.processor().getMemory();
 		int paddr = ppn * pageSize;
 
-		// Fill the frame from the correct source.
-		Integer slot = swapTable.remove(vpn);
+		Integer slot = swapTable.get(vpn);
 		if (slot != null) {
-			// Previously evicted: restore its contents from swap.
+			// Previously evicted: restore from swap outside the lock.
+			VMKernel.vmLock.release();
 			VMKernel.swapIn(slot, ppn);
-			VMKernel.freeSwapSlot(slot);
+			VMKernel.vmLock.acquire();
 		} else {
-			Arrays.fill(memory, paddr, paddr + pageSize, (byte) 0);
+			// Identify the COFF section under the lock (metadata only, no I/O).
+			CoffSection coffSection = null;
+			int coffPageIndex = -1;
 			for (int s = 0; s < coff.getNumSections(); s++) {
 				CoffSection section = coff.getSection(s);
 				int firstVPN = section.getFirstVPN();
 				if (vpn >= firstVPN && vpn < firstVPN + section.getLength()) {
-					section.loadPage(vpn - firstVPN, ppn);
+					coffSection = section;
+					coffPageIndex = vpn - firstVPN;
 					pageTable[vpn].readOnly = section.isReadOnly();
 					break;
 				}
+			}
+			if (coffSection != null) {
+				// Load from COFF file outside the lock.
+				VMKernel.vmLock.release();
+				coffSection.loadPage(coffPageIndex, ppn);
+				VMKernel.vmLock.acquire();
+			} else {
+				// Zero-fill: pure memory op, stays under the lock.
+				Arrays.fill(memory, paddr, paddr + pageSize, (byte) 0);
 			}
 		}
 
 		pageTable[vpn].ppn = ppn;
 		pageTable[vpn].valid = true;
 		pageTable[vpn].used = true;
+		pageTable[vpn].dirty = false;
 
-		// Register the frame in the inverted page table so it can be evicted.
-		VMKernel.registerPage(ppn, this, pageTable[vpn]);
+		VMKernel.unpinPage(ppn);
     }
 
 	/**
@@ -244,6 +260,15 @@ public class VMProcess extends UserProcess {
 	 */
 	public void recordSwap(int vpn, int slot) {
 		swapTable.put(vpn, slot);
+	}
+
+	/**
+	 * Return the swap slot for virtual page <tt>vpn</tt>, or -1 if page
+	 * has never been evicted. Caller holds the global VM lock.
+	 */
+	public int getSwapSlot(int vpn) {
+		Integer slot = swapTable.get(vpn);
+		return (slot != null) ? slot : -1;
 	}
 
 	/** Maps each evicted virtual page to its slot in the global swap file. */
