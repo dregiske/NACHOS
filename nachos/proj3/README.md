@@ -13,7 +13,9 @@ Andre Giske - A17918324
 I contributed to the checkpoint and part 2
 
 ### Preity Singh
-I implemented the checkpoint and parts 3 and 4.
+Checkpoint: Modified loadSections to mark all page table entries invalid upfront with no physical memory allocated. On first access, the CPU faults into handlePageFaultLocked, which grabs a free frame, loads the right COFF section or zero-fills for stack/args, marks the entry valid, and lets the instruction retry.
+Part 3: Eviction now skips the swap write entirely for clean pages since they can just be reloaded from COFF or zero-filled again. I also kept swap slots alive after swap-in so a clean re-eviction doesn't need a new slot, added a getSwapSlot helper to reuse existing slots for dirty pages, and manually set dirty = true in writeVirtualMemory since kernel copies bypass the CPU's dirty tracking.
+Part 4: Added pinnedCount and unpinCondition to the kernel and pinPage/unpinPage helpers that flag IPTEntry.pinned and wake waiting threads. Victim frames get pinned before dropping vmLock for the swap write so the clock hand skips them. In handlePageFaultLocked, newly allocated frames get pinned before releasing the lock, I/O happens outside the lock, then I reacquire, update the translation, and unpin, so multiple processes can fault in parallel during disk I/O.
 
 ### Andre Giske
 
