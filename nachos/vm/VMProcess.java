@@ -5,6 +5,7 @@ import nachos.threads.*;
 import nachos.userprog.*;
 import nachos.vm.*;
 import java.util.Arrays;
+import java.util.HashMap;
 
 /**
  * A <tt>UserProcess</tt> that supports demand-paging.
@@ -53,7 +54,28 @@ public class VMProcess extends UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
-		super.unloadSections();
+		VMKernel.vmLock.acquire();
+
+		// Free every physical frame this process currently holds, clearing the
+		// inverted page table so the clock no longer considers it ours.
+		for (int i = 0; i < numPages; i++) {
+			if (pageTable[i] != null && pageTable[i].valid) {
+				int ppn = pageTable[i].ppn;
+				VMKernel.clearPage(ppn);
+				UserKernel.freePage(ppn);
+				pageTable[i].valid = false;
+				pageTable[i].ppn = -1;
+			}
+		}
+
+		// Free every swap slot this process allocated.
+		for (int slot : swapTable.values())
+			VMKernel.freeSwapSlot(slot);
+		swapTable.clear();
+
+		VMKernel.vmLock.release();
+
+		coff.close();
 	}
 
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
@@ -70,17 +92,23 @@ public class VMProcess extends UserProcess {
 			if (vpn < 0 || vpn >= pageTable.length || pageTable[vpn] == null)
 				break;
 
-			if (!pageTable[vpn].valid)
-				handlePageFault(vpn);
+			VMKernel.vmLock.acquire();
 
 			if (!pageTable[vpn].valid)
+				handlePageFaultLocked(vpn);
+
+			if (!pageTable[vpn].valid) {
+				VMKernel.vmLock.release();
 				break;
+			}
 
 			int ppn = pageTable[vpn].ppn;
 			int physAddr = ppn * pageSize + pageOffset;
 
 			int amount = Math.min(length, pageSize - pageOffset);
 			System.arraycopy(memory, physAddr, data, offset, amount);
+
+			VMKernel.vmLock.release();
 
 			vaddr += amount;
 			offset += amount;
@@ -105,20 +133,24 @@ public class VMProcess extends UserProcess {
 			if (vpn < 0 || vpn >= pageTable.length || pageTable[vpn] == null)
 				break;
 
-			if (!pageTable[vpn].valid)
-				handlePageFault(vpn);
+
+			VMKernel.vmLock.acquire();
 
 			if (!pageTable[vpn].valid)
-				break;
+				handlePageFaultLocked(vpn);
 
-			if (pageTable[vpn].readOnly)
+			if (!pageTable[vpn].valid || pageTable[vpn].readOnly) {
+				VMKernel.vmLock.release();
 				break;
+			}
 
 			int ppn = pageTable[vpn].ppn;
 			int physAddr = ppn * pageSize + pageOffset;
 
 			int amount = Math.min(length, pageSize - pageOffset);
 			System.arraycopy(data, offset, memory, physAddr, amount);
+
+			VMKernel.vmLock.release();
 
 			vaddr += amount;
 			offset += amount;
@@ -129,31 +161,56 @@ public class VMProcess extends UserProcess {
 		return transferred;
 	}
 
+	/**
+	 * Fault in the page for <tt>vpn</tt>, acquiring the global VM lock for the
+	 * duration. Used by the exception handler, which holds no lock.
+	 */
 	private void handlePageFault(int vpn) {
-        // ... the helper code ...
+		VMKernel.vmLock.acquire();
+		handlePageFaultLocked(vpn);
+		VMKernel.vmLock.release();
+	}
+
+	/**
+	 * Fault in the page for <tt>vpn</tt>. The caller must already hold
+	 * {@link VMKernel#vmLock}; readVirtualMemory/writeVirtualMemory call this
+	 * directly so the lock can also cover the subsequent copy, keeping the page
+	 * from being evicted between fault-in and use.
+	 */
+	private void handlePageFaultLocked(int vpn) {
+		// Obtain a physical frame: take a free one if available, otherwise evict.
 		int ppn = UserKernel.allocatePage();
-		if (ppn == -1) {
-			return;
-		}
+		if (ppn == -1)
+			ppn = VMKernel.evictPage();
 
 		byte[] memory = Machine.processor().getMemory();
 		int paddr = ppn * pageSize;
-		Arrays.fill(memory, paddr, paddr + pageSize, (byte) 0);
 
-		boolean readOnly = false;
-		for (int s = 0; s < coff.getNumSections(); s++) {
-			CoffSection section = coff.getSection(s);
-			int firstVPN = section.getFirstVPN();
-			if (vpn >= firstVPN && vpn < firstVPN + section.getLength()) {
-				section.loadPage(vpn - firstVPN, ppn);
-				readOnly = section.isReadOnly();
-				break;
+		// Fill the frame from the correct source.
+		Integer slot = swapTable.remove(vpn);
+		if (slot != null) {
+			// Previously evicted: restore its contents from swap.
+			VMKernel.swapIn(slot, ppn);
+			VMKernel.freeSwapSlot(slot);
+		} else {
+			Arrays.fill(memory, paddr, paddr + pageSize, (byte) 0);
+			for (int s = 0; s < coff.getNumSections(); s++) {
+				CoffSection section = coff.getSection(s);
+				int firstVPN = section.getFirstVPN();
+				if (vpn >= firstVPN && vpn < firstVPN + section.getLength()) {
+					section.loadPage(vpn - firstVPN, ppn);
+					pageTable[vpn].readOnly = section.isReadOnly();
+					break;
+				}
 			}
 		}
 
 		pageTable[vpn].ppn = ppn;
 		pageTable[vpn].valid = true;
-		pageTable[vpn].readOnly = readOnly;
+		pageTable[vpn].used = true;
+
+		// Register the frame in the inverted page table so it can be evicted.
+		VMKernel.registerPage(ppn, this, pageTable[vpn]);
     }
 
 	/**
@@ -179,6 +236,18 @@ public class VMProcess extends UserProcess {
 			break;
 		}
 	}
+
+	/**
+	 * Record that this process's virtual page <tt>vpn</tt> has been evicted to
+	 * swap slot <tt>slot</tt>. Called by {@link VMKernel#evictPage} when this
+	 * process owns the victim frame. Caller holds the global VM lock.
+	 */
+	public void recordSwap(int vpn, int slot) {
+		swapTable.put(vpn, slot);
+	}
+
+	/** Maps each evicted virtual page to its slot in the global swap file. */
+	private HashMap<Integer, Integer> swapTable = new HashMap<Integer, Integer>();
 
 	private static final int pageSize = Processor.pageSize;
 
