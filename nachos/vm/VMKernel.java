@@ -190,13 +190,10 @@ public class VMKernel extends UserKernel {
 		victim.entry.valid = false;
 		victim.entry.ppn = -1;
 
-		// Write dirty pages to swap outside the lock.
 		if (victim.entry.dirty) {
 			int existingSlot = victim.process.getSwapSlot(victim.entry.vpn);
 			int slot = (existingSlot >= 0) ? existingSlot : allocateSwapSlot();
-			vmLock.release();
 			swapOut(victimPpn, slot);
-			vmLock.acquire();
 			victim.process.recordSwap(victim.entry.vpn, slot);
 		}
 
