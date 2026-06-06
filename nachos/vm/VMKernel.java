@@ -193,7 +193,9 @@ public class VMKernel extends UserKernel {
 		if (victim.entry.dirty) {
 			int existingSlot = victim.process.getSwapSlot(victim.entry.vpn);
 			int slot = (existingSlot >= 0) ? existingSlot : allocateSwapSlot();
+			vmLock.release();
 			swapOut(victimPpn, slot);
+			vmLock.acquire();
 			victim.process.recordSwap(victim.entry.vpn, slot);
 		}
 
