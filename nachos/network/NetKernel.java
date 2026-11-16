@@ -94,7 +94,6 @@ public class NetKernel extends VMKernel {
 						ping.packet.dstLink, ping.dstPort, ping.contents);
 			}
 			catch (MalformedPacketException e) {
-				// should never happen...
 				continue;
 			}
 
